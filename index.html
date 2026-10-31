@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#6F4E37">
+  <title>Кофейня — Карта лояльности</title>
+  <link rel="manifest" href="manifest.json">
+  <!-- Загружаем библиотеку с надежного CDN (Cloudflare) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #6F4E37;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      color: #333;
+      border-radius: 24px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; color: #6F4E37; }
+    .sub { font-size: 14px; color: #888; margin-bottom: 22px; }
+    label { display: block; text-align: left; font-size: 13px; color: #666; margin-bottom: 6px; margin-top: 14px; }
+    input {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 17px;
+      border: 2px solid #eee;
+      border-radius: 12px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #6F4E37; }
+    button {
+      width: 100%;
+      padding: 16px;
+      margin-top: 20px;
+      font-size: 17px;
+      font-weight: 600;
+      color: #fff;
+      background: #6F4E37;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:active { opacity: 0.8; }
+    button:disabled { background: #ccc; }
+    
+    #qrScreen { display: none; }
+    
+    /* Контейнер под QR-код */
+    #qrBox {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 18px auto;
+      padding: 16px;
+      background: #fff;
+      border-radius: 16px;
+      width: 292px; 
+      height: 292px;
+    }
+    
+    .phone-big { font-size: 20px; font-weight: 600; color: #6F4E37; letter-spacing: 1px; margin-top: 15px; }
+    .hint { font-size: 13px; color: #888; margin-top: 14px; line-height: 1.4; }
+    .reset {
+      margin-top: 18px;
+      font-size: 13px;
+      color: #aaa;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .brightness-tip {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 10px;
+    }
+    .loader {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <!-- Экран регистрации -->
+    <div id="regScreen">
+      <h1>☕ Добро пожаловать</h1>
+      <p class="sub">Введите номер телефона, чтобы получить карту лояльности</p>
+
+      <label for="name">Имя</label>
+      <input type="text" id="name" placeholder="Как вас зовут?" autocomplete="name">
+
+      <label for="phone">Номер телефона</label>
+      <input type="tel" id="phone" placeholder="+7 (___) ___-__-__" autocomplete="tel" inputmode="tel" maxlength="18">
+
+      <button id="submitBtn" onclick="saveAndShow()">Получить карту</button>
+      <p class="hint">Номер нужен только для того, чтобы кассир мог найти вас в системе лояльности.</p>
+    </div>
+
+    <!-- Экран с картой -->
+    <div id="qrScreen">
+      <h1>Ваша карта</h1>
+      <p class="sub">Покажите этот код кассиру</p>
+
+      <div id="qrBox"></div>
+      <div class="phone-big" id="phoneDisplay"></div>
+      <p class="brightness-tip">Увеличьте яркость экрана для сканирования</p>
+
+      <button class="reset" onclick="resetCard()">Изменить номер</button>
+    </div>
+  </div>
+
+  <script>
+    // === НАСТРОЙКА ===
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw_Ex_WQCmqxzqHmLru9XRYYIlQaezEruxA_80_-mEgScrkFdOSN3V6O8u6v9kMQTpT/exec';
+
+    // === ЛОГИКА ===
+    
+    // 1. Маска для телефона
+    const phoneInput = document.getElementById('phone');
+    phoneInput.addEventListener('input', function (e) {
+      let input = e.target.value.replace(/\D/g, ''); 
+      if (!input) {
+        e.target.value = '';
+        return;
+      }
+      
+      if (input[0] === '8') input = '7' + input.slice(1);
+      if (input[0] !== '7') input = '7' + input;
+
+      let formatted = '+7 ';
+      if (input.length > 1) formatted += '(' + input.substring(1, 4);
+      if (input.length >= 5) formatted += ') ' + input.substring(4, 7);
+      if (input.length >= 8) formatted += '-' + input.substring(7, 9);
+      if (input.length >= 10) formatted += '-' + input.substring(9, 11);
+
+      e.target.value = formatted;
+    });
+
+    function saveAndShow() {
+      const name = document.getElementById('name').value.trim();
+      const phoneRaw = document.getElementById('phone').value.trim();
+      const btn = document.getElementById('submitBtn');
+
+      let digits = phoneRaw.replace(/\D/g, '');
+      
+      if (digits.length !== 11) {
+        alert('Пожалуйста, введите номер полностью (11 цифр).');
+        return;
+      }
+
+      const finalPhone = '+' + digits; 
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loader"></span> Сохраняем...';
+
+      // Отправляем в Google
+      fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Без имени', phone: finalPhone })
+      }).catch((error) => {
+        console.error('Ошибка отправки:', error);
+      }).finally(() => {
+        localStorage.setItem('loyalty_name', name);
+        localStorage.setItem('loyalty_phone', finalPhone);
+        showQR(finalPhone);
+        btn.disabled = false;
+        btn.innerHTML = 'Получить карту';
+      });
+    }
+
+    function showQR(phoneNumber) {
+      document.getElementById('regScreen').style.display = 'none';
+      document.getElementById('qrScreen').style.display = 'block';
+      document.getElementById('phoneDisplay').textContent = phoneNumber;
+
+      const qrBox = document.getElementById('qrBox');
+      qrBox.innerHTML = ''; // Очищаем контейнер
+
+      // Генерация QR-кода
+      new QRCode(qrBox, {
+        text: phoneNumber,
+        width: 260,
+        height: 260,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
+
+    function resetCard() {
+      if (!confirm('Удалить сохранённый номер с этого телефона?')) return;
+      localStorage.removeItem('loyalty_name');
+      localStorage.removeItem('loyalty_phone');
+      document.getElementById('qrScreen').style.display = 'none';
+      document.getElementById('regScreen').style.display = 'block';
+      document.getElementById('phone').value = '';
+      document.getElementById('name').value = '';
+    }
+
+    // При загрузке проверяем сохраненный номер
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedPhone = localStorage.getItem('loyalty_phone');
+      if (savedPhone) {
+        showQR(savedPhone);
+      }
+    });
+  </script>
+</body>
+</html>
